@@ -1,0 +1,73 @@
+name: Build
+on:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  build_android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # BƯỚC 1: Cài JDK 17 tạm thời để setup Android SDK (Vì v3 bắt buộc JDK 17)
+      - name: Set up JDK 17 for SDK Manager
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # Dùng đúng tham số 'packages' thay vì 'api-level' để tránh Warning
+          packages: 'platforms;android-19 build-tools;25.2.5'
+
+      # BƯỚC 2: Quay lại JDK 8 để build code cũ
+      - name: Set up JDK 8 for Legacy Build
+        uses: actions/setup-java@v4
+        with:
+          java-version: '8'
+          distribution: 'temurin'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 12
+
+      - name: Download NDK r17b
+        run: |
+          curl -L -o android-ndk-r17b-linux-x86_64.zip https://dl.google.com/android/repository/android-ndk-r17b-linux-x86_64.zip
+          unzip -q android-ndk-r17b-linux-x86_64.zip -d $HOME/android-ndk
+          rm android-ndk-r17b-linux-x86_64.zip
+
+      - name: Set NDK path
+        run: |
+          echo "NDK_HOME=$HOME/android-ndk/android-ndk-r17b" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$HOME/android-ndk/android-ndk-r17b" >> $GITHUB_ENV
+          mkdir -p telon-gateway-app/android
+          echo "ndk.dir=$HOME/android-ndk/android-ndk-r17b" > telon-gateway-app/android/local.properties
+
+      - name: Install Dependencies
+        run: npm install
+        working-directory: telon-gateway-app
+
+      - name: Build Android Assets
+        run: |
+          mkdir -p android/app/build/intermediates/assets/release/
+          npx react-native bundle --platform android --dev false --entry-file index.js --bundle-output android/app/build/intermediates/assets/release/index.android.bundle --assets-dest android/app/build/intermediates/res/merged/release
+        working-directory: telon-gateway-app
+
+      - name: Build Android Release
+        run: |
+          cd android
+          chmod +x gradlew 
+          ./gradlew assembleRelease --no-daemon
+        working-directory: telon-gateway-app
+
+      - name: Archive APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: telon-gateway-app/android/app/build/outputs/apk/release/*.apk
